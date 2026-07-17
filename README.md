@@ -1,111 +1,122 @@
-# Delta Proxy: Visible-Mode Lyapunov Geometry and Spectral Screening for Conservative Matrix Fields
+# Delta Proxy: visible-mode Lyapunov geometry for CMFs
 
-## Overview
+This repository contains the manuscript, companion-CMF implementation, exact
+integer verifier, corrected QR spectral proxy, GPU screening pipeline and local
+regression data for:
 
-This repository contains the complete code, data, and reproducibility package for the paper:
+> **Visible-Mode Lyapunov Geometry and High-Throughput Spectral Screening of
+> 6F5 Conservative Matrix Fields**
 
-> **Visible-Mode Lyapunov Geometry and High-Throughput Spectral Screening of 6F5 Conservative Matrix Fields**
+## Current scientific status
 
-The paper presents a spectral proxy method for screening irrationality candidates in high-dimensional Conservative Matrix Fields (CMFs). The key insight is that the arithmetic convergence quality of a matrix-cocycle-generated approximation system is determined not by the second Lyapunov exponent alone, but by the first Lyapunov mode visible to the projective observable.
+The repository is in **pre-submission correction** status.
 
-## Repository Structure
+The conditional visible-mode theorem and the exterior-product identity are
+mathematical statements. The GPU proxy is an experimental screening statistic,
+not an arithmetic certificate. Historical large-sweep throughput and survivor
+statistics were produced before a product-order audit and must be rerun with the
+corrected implementation before they are used as submission-level evidence.
 
-```
-deltaproxy/
-├── gpu_proxy/                    # GPU proxy kernel and sweep drivers
-│   ├── proxy_kernel.py           # cupy/torch/numpy proxy kernel (QR-based Lyapunov)
-│   ├── gpu_sweep.py              # Stage-1 GPU screening driver
-│   ├── params.py                 # Deterministic parameter generation (matches on-device)
-│   ├── calibrate.py              # GPU calibration and parity checks
-│   ├── lumi_zpm1_positive_669.sbatch  # LUMI SLURM script for z=+1/-1 sweep
-│   ├── lumi_sweep_669.sbatch     # LUMI SLURM script for general sweeps
-│   └── README.md                 # GPU proxy documentation
-├── cmf_generic.py                # Generic CMF construction (companion matrix cocycle)
-├── spectral_delta.py             # Exact arithmetic delta computation
-├── proxy_batch.py                # Batched proxy computation (numpy/torch)
-├── benchmark_proxy_vs_exact.py   # Reproducible benchmark: proxy vs exact RNS
-├── validation_holdout.py         # Independent validation holdout sets
-├── jstar_estimator.py            # Practical J* estimator (blind, post-hoc, SV-based)
-├── sweep_zpm1.py                 # Local z=+1/-1 sweep driver
-├── deploy_zpm1_full.sh           # LUMI deployment script (rsync + launch)
-├── pslq_companion.py             # PSLQ integer relation identification
-├── verify_survivors.py           # Stage-2 exact verification of survivors
-├── enrich.py                     # Enrichment factor measurement
-├── harvest.py                    # Discovery run with checkpointing
-├── filter_survivors.py           # Post-sweep filtering utilities
-├── lyapunov_delta_proxy.tex      # Main paper (LaTeX source)
-├── REPRODUCIBILITY.md            # Full reproducibility documentation
-└── benchmark_results.json        # Benchmark output (CPU reference)
-```
+See [`SUBMISSION_READINESS_UPDATE.md`](SUBMISSION_READINESS_UPDATE.md) for the
+complete correction log and mandatory rerun plan.
 
-## Requirements
+## Conventions fixed by the audit
 
-- Python 3.10+
-- numpy, mpmath
-- (GPU only) cupy-rocm or torch+ROCm
-- tectonic (for LaTeX compilation)
+### Matrix product
 
-## Quick Start
+All code now uses
 
-### CPU Benchmark (reproducible on any machine)
+\[
+P_N=M_1M_2\cdots M_N.
+\]
 
-```bash
-python3 benchmark_proxy_vs_exact.py --dim 6 --n-candidates 5000 \
-    --depth 120 --box 6 --workers 8 --out benchmark_results.json
-```
+The exact engine updates `P = P @ M_n`. The QR proxy propagates `M_n.T @ Q`,
+which analyzes `P_N.T` and hence the same singular spectrum.
 
-### Validation Holdouts
+### Observable
 
-```bash
-python3 validation_holdout.py --dim 6 --n 2000 --depth 120 --box 6 \
-    --workers 8 --out validation_results.json
-```
+Exact delta can be computed either for a fixed ordered row pair `(i,j)` or as
 
-### J* Estimator
+\[
+\delta_N^{\max}=\max_{i\ne j}\delta_N(e_i^T,e_j^T)
+\]
+
+over a finite family declared in advance. The maximizing pair is returned and
+must not be conflated with a fixed-observable theorem.
+
+### Degeneracy
+
+A finite-depth rank-loss event occurs when a numerator root
+
+\[
+f_i(n)=s_i+n d_i+1
+\]
+
+vanishes at an inspected integer step. The old `shift[i] == -1` filter was too
+broad for moving roots and too weak for other integer zero crossings.
+
+## Quick local checks
 
 ```bash
-# Post-hoc analysis (requires exact delta)
-python3 jstar_estimator.py --mode posthoc --dim 6 --depth 120 \
-    --shift '[-2,-2,0,0,-2,0,-2,-2,-2,0,-2]' \
-    --dir '[0,0,0,0,0,0,0,0,0,1,0]' --z-num 7 --z-den 20
+python3 -m pip install -r requirements.txt
+python3 -m unittest discover -s tests -v
 
-# Blind full-ladder screening
-python3 jstar_estimator.py --mode blind --dim 6 --depth 120 --box 6
+python3 benchmark_proxy_vs_exact.py \
+  --n-candidates 300 --n-exact 300 --depth 80 --workers 4 \
+  --out benchmark_results_corrected.json
+
+python3 validation_precision.py \
+  --depth 80 --random 150 --attempts 3000 --boundary 0.05 --boundary-n 20 \
+  --out precision_validation_results.json
+
+python3 validation_holdout.py \
+  --n 500 --depth 120 --workers 8 --out validation_results_corrected.json
 ```
 
-### GPU Sweep (LUMI)
+## GPU preflight
 
 ```bash
-# Sync code to LUMI
-bash deploy_zpm1_full.sh sync
+cd gpu_proxy
+python3 calibrate.py --dim 6 --backend torch --dtype float32 \
+  --nrank 120 --batches 200000,1000000,4000000 --repeats 5 \
+  --out gpu_calibration_r2.json
 
-# Launch production sweep
-bash deploy_zpm1_full.sh launch
-
-# Check status
-bash deploy_zpm1_full.sh status
-
-# Fetch results
-bash deploy_zpm1_full.sh fetch
+python3 calibrate.py --dim 6 --backend torch --dtype float32 \
+  --nrank 120 --batches 200000,1000000,4000000 --repeats 5 \
+  --full-ladder --out gpu_calibration_full_ladder.json
 ```
+
+The full-ladder index is named `k_candidate`; it is **not** an independent
+estimate of `J*`.
+
+## Repository map
+
+- `lyapunov_delta_proxy.tex` — revised manuscript source.
+- `cmf_generic.py` — companion matrices, exact right products, fixed-pair and
+  finite-family deltas, finite-depth degeneracy checks.
+- `spectral_delta.py` — corrected right-product QR spectrum.
+- `proxy_batch.py` — batched NumPy/Torch-compatible spectrum.
+- `benchmark_proxy_vs_exact.py` — matched local CPU benchmark.
+- `validation_precision.py` — float32/float64 versus exact validation.
+- `validation_holdout.py` — structurally disjoint holdouts.
+- `jstar_estimator.py` — candidate-mode and post-hoc diagnostics with explicit
+  epistemic warnings.
+- `gpu_proxy/` — GPU kernel, sweep driver, exact verification and LUMI scripts.
+- `tests/` — product-order, observable, degeneracy and GPU/CPU parity tests.
+- `results/regression/` — small corrected local results; not production evidence.
+
+## Reproducibility and archival policy
+
+The final submission release should contain or reference, by persistent DOI:
+
+- matched corrected GPU/RNS benchmark logs;
+- float32 and float64 precision-validation outputs;
+- survivor and all-verification manifests;
+- deduplicated unique-trajectory counts;
+- job metadata and exact git commit;
+- SHA-256 checksum manifest;
+- completed rather than ongoing sweep results.
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
-
-## Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@software{deltaproxy2026,
-  author = {Vesterlund, David},
-  title = {Delta Proxy: Visible-Mode Lyapunov Geometry and Spectral Screening for CMFs},
-  url = {https://github.com/VesterlundCoder/deltaproxy},
-  year = {2026}
-}
-```
-
-## Contact
-
-David Vesterlund -- https://github.com/VesterlundCoder
+MIT. See [`LICENSE`](LICENSE).
