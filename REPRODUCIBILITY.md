@@ -1,126 +1,96 @@
-# Reproducibility Package — Visible-Mode Lyapunov Geometry Paper
+# Reproducibility Package
 
-## Overview
+## Repository
 
-This package contains all scripts and data needed to reproduce the computational
-results in "Visible-Mode Lyapunov Geometry and High-Throughput Spectral Screening
-of 6F5 Conservative Matrix Fields".
+**GitHub:** https://github.com/VesterlundCoder/deltaproxy  
+**License:** MIT  
+**Version:** v1.0 (July 2026)
 
-## Requirements
+## Software Requirements
 
 - Python 3.10+
 - numpy, mpmath
-- (GPU only) cupy-rocm or torch+ROCm
-- tectonic (for LaTeX compilation)
+- (GPU) cupy-rocm or torch+ROCm (LUMI PyTorch container)
+- tectonic (LaTeX compilation)
 
-## Scripts
+## Code Inventory
 
-### Benchmark
+| File | Purpose |
+|------|---------|
+| `cmf_generic.py` | Generic CMF construction, exact integer delta |
+| `spectral_delta.py` | Lyapunov spectrum computation (QR-based) |
+| `proxy_batch.py` | Batched proxy computation |
+| `gpu_proxy/proxy_kernel.py` | GPU proxy kernel (cupy/torch/numpy) |
+| `gpu_proxy/gpu_sweep.py` | Stage-1 GPU screening driver |
+| `gpu_proxy/params.py` | Deterministic parameter generation (bit-identical to GPU) |
+| `gpu_proxy/calibrate.py` | GPU calibration and parity checks |
+| `benchmark_proxy_vs_exact.py` | Reproducible benchmark: proxy vs exact |
+| `validation_holdout.py` | Five independent holdout validations |
+| `jstar_estimator.py` | J* estimator (blind, post-hoc, SV-based) |
+| `pslq_companion.py` | PSLQ integer relation identification |
+| `verify_survivors.py` | Stage-2 exact verification |
+| `sweep_zpm1.py` | Local z=+1/-1 sweep driver |
+| `deploy_zpm1_full.sh` | LUMI deployment (rsync + SLURM) |
+| `gpu_proxy/lumi_zpm1_positive_669.sbatch` | SLURM script for z=+1/-1 sweep |
+| `gpu_proxy/lumi_sweep_669.sbatch` | SLURM script for general sweeps |
+
+## Reproducible Commands
+
+### CPU Benchmark (any machine)
 ```bash
-# CPU benchmark (reproducible on any machine)
-python3 benchmark_proxy_vs_exact.py --dim 6 --n-candidates 5000 \
+python3 benchmark_proxy_vs_exact.py --dim 6 --n-candidates 2000 \
     --depth 120 --box 6 --workers 8 --out benchmark_results.json
 ```
-Outputs: raw throughput speedup, sign-agreement, MAE, precision/recall,
-end-to-end discovery speedup, cost per confirmed hit.
 
-### Validation holdouts
+### Validation Holdouts
 ```bash
-python3 validation_holdout.py --dim 6 --n 2000 --depth 120 --box 6 \
+python3 validation_holdout.py --dim 6 --n 500 --depth 120 --box 6 \
     --workers 8 --out validation_results.json
 ```
-Five independent holdout sets: shard, direction, z-value, full-dimensional,
-adversarial degeneracy.
 
-### J* estimator
+### J* Estimator
 ```bash
-# Blind full-ladder screening
-python3 jstar_estimator.py --mode blind --dim 6 --n 1000 --depth 120 --box 6
-
-# Post-hoc J* identification for a known trajectory
 python3 jstar_estimator.py --mode posthoc --dim 6 --depth 120 \
     --shift '[-2,-2,0,0,-2,0,-2,-2,-2,0,-2]' \
     --dir '[0,0,0,0,0,0,0,0,0,1,0]' --z-num 7 --z-den 20
-
-# Singular-vector visibility analysis
-python3 jstar_estimator.py --mode svvis --dim 6 --depth 120 \
-    --shift '[-2,-2,0,0,-2,0,-2,-2,-2,0,-2]' \
-    --dir '[0,0,0,0,0,0,0,0,0,1,0]' --z-num 7 --z-den 20
 ```
 
-### PSLQ sampling
+### GPU Sweep (LUMI)
 ```bash
-python3 sample_pslq_lumi.py --input survivors_all.jsonl \
-    --sample-size 500 --depth 300 --dps 200 --workers 8
+bash deploy_zpm1_full.sh sync     # rsync code
+bash deploy_zpm1_full.sh launch   # submit 16 waves
+bash deploy_zpm1_full.sh status   # check queue
+bash deploy_zpm1_full.sh fetch    # download survivors
 ```
 
-### GPU sweep (LUMI)
-```bash
-# See gpu_proxy/README.md for LUMI setup
-python3 gpu_proxy/gpu_sweep.py --dim 6 --total 2000000000 \
-    --batch 4000000 --backend cupy --dtype float32 --thresh 0.02 \
-    --out survivors_6f5.jsonl
-```
+## LUMI Environment
 
-## Random seeds
+- **Project:** project_465002669
+- **Container:** lumi-pytorch-rocm-6.0.3-python-3.12-pytorch-v2.3.1
+- **Hardware:** AMD MI250X, 64 GB HBM2e per GCD, 2 GCDs per module
+- **Billing:** 1 GPU-hour per MI250X module (2 GCDs)
+- **Throughput:** ~301k trajectories/s/GCD (float32, dim=6, N=120)
+
+## Seeds
 
 | Seed | Purpose |
 |------|---------|
 | 20260626 | LUMI 6F5 sweep 1 (200B trajectories) |
-| 20270704 | LUMI 6F5 sweep 2 (200B trajectories, replication) |
+| 20270704 | LUMI 6F5 sweep 2 (200B trajectories) |
 | 99999 | Shard holdout validation |
-| 88888 | Direction holdout validation |
-| 77777 | Z-holdout validation |
-| 66666 | Full-dimensional holdout validation |
-| 55555 | Adversarial degeneracy validation |
+| 20260717 | z=+1/-1 boundary sweep |
 
-## LUMI environment
+## Data Availability
 
-- Container: PyTorch/2.6.0-rocm-6.2.4-python-3.12-singularity-20250404
-- Project: project_465002669
-- GPU: AMD MI250X (128 GB HBM2e per GCD)
-- 8 GCDs per node
+All trajectories are re-derivable from (seed, gid) using the deterministic parameter generator in `gpu_proxy/params.py`, which is bit-identical to the on-device GPU generator in `proxy_kernel.py`. Survivor manifests and verification certificates are available in the repository.
 
-## Verification ladder
+## Citation
 
-| Level | Method | Status |
-|-------|--------|--------|
-| V0 | Float proxy flag | Automated |
-| V1 | Independent integer engine | Automated |
-| V2 | Exact confirmation | Automated |
-| V3 | CAS certificates (mpmath, Python, SageMath) | Automated |
-| V4 | Monotonic convergence check | Automated |
-| V5 | Formal theorem | Open |
-
-## Claim matrix
-
-| Class | Claim |
-|-------|-------|
-| Theorem | Visible-mode delta theorem (conditional) |
-| Exact identity | Wedge/cross-product formula |
-| Verified computation | Exact arithmetic for specified trajectories |
-| Empirical law | Proxy tracks exact delta in test population |
-| Benchmark result | 10^9 trajectories/GPU-hour, ~10^4 speedup |
-| Conjecture | Generic J*-CMF law |
-| Conjecture | Delta Ladder: delta -> 1/(d_eff - 1) |
-| Research program | Global CMF/Stokes geometry |
-
-## File listing
-
-```
-benchmark_proxy_vs_exact.py   — Reproducible benchmark
-validation_holdout.py          — Five independent holdout validations
-jstar_estimator.py             — J* estimation (blind, post-hoc, SV)
-sample_pslq_lumi.py            — PSLQ sampling for LUMI survivors
-spectral_delta.py              — Core Lyapunov spectrum computation
-cmf_generic.py                 — Dimension-generic CMF machinery
-pslq_companion.py              — Exact delta + PSLQ identification
-gpu_proxy/
-  proxy_kernel.py              — GPU QR kernel (cupy/torch)
-  gpu_sweep.py                 — Stage-1 GPU sweep driver
-  calibrate.py                 — GPU calibration probe
-  README.md                    — LUMI setup instructions
-spectrum_diag.py               — Multi-ratio spectral diagnostics
-lyapunov_delta_proxy.tex       — LaTeX paper source
-lyapunov_delta_proxy.pdf       — Compiled PDF
+```bibtex
+@software{deltaproxy2026,
+  author = {Vesterlund, David},
+  title = {Delta Proxy: Visible-Mode Lyapunov Geometry and Spectral Screening for CMFs},
+  url = {https://github.com/VesterlundCoder/deltaproxy},
+  year = {2026}
+}
 ```

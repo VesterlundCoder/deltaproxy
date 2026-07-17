@@ -140,10 +140,14 @@ def main():
             "raw_throughput_speedup": raw_speedup,
             "sign_agreement": sign_agree, "mae": mae,
             "tp": tp, "fp": fp, "fn": fn, "tn": tn,
-            "precision": tp/max(tp+fp,1), "recall": tp/max(tp+fn,1),
+            "precision": tp/max(tp+fp,1) if (tp+fp) > 0 else None,
+            "recall": tp/max(tp+fn,1) if (tp+fn) > 0 else None,
             "proxy_survivors": survivors,
             "e2e_speedup": e2e,
-            "cost_per_hit_s": total_proxy / max(tp, 1),
+            "cost_per_hit_s": total_proxy / tp if tp > 0 else None,
+            "cost_per_hit_note": "not estimable (TP=0)" if tp == 0 else None,
+            "n_positives_exact": int(ep.sum()),
+            "n_positives_proxy": int(pp.sum()),
         },
     }
     print(f"\n=== RESULTS ===")
@@ -151,7 +155,12 @@ def main():
     print(f"  Sign agreement: {sign_agree:.4f}  MAE: {mae:.4f}")
     print(f"  TP={tp} FP={fp} FN={fn} TN={tn}")
     print(f"  E2E speedup: {e2e:,.0f}x")
-    print(f"  Cost per confirmed hit: {total_proxy/max(tp,1):.2f}s")
+    cost_str = f"{total_proxy/tp:.2f}s" if tp > 0 else "not estimable (TP=0)"
+    print(f"  Cost per confirmed hit: {cost_str}")
+    print(f"  Exact positives: {int(ep.sum())}  Proxy positives: {int(pp.sum())}")
+    if tp + fp + fn == 0:
+        print(f"  NOTE: No positives in sample. Precision/recall not estimable.")
+        print(f"        Sign agreement on negatives only. See validation_holdout.py for stratified tests.")
 
     with open(args.out, "w") as f:
         json.dump(R, f, indent=2, default=str)
