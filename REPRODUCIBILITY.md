@@ -1,96 +1,192 @@
-# Reproducibility Package
+# Reproducibility package - corrected pre-submission branch
 
-## Repository
+## Status
 
-**GitHub:** https://github.com/VesterlundCoder/deltaproxy  
-**License:** MIT  
-**Version:** v1.0 (July 2026)
+This package records the product-order, observable and degeneracy corrections
+found during the submission audit. Small local regressions are included. The
+historical large GPU sweeps and the historical RNS comparison are **legacy
+results** until rerun with the corrected implementation.
 
-## Software Requirements
+## Mathematical/computational conventions
 
-- Python 3.10+
-- numpy, mpmath
-- (GPU) cupy-rocm or torch+ROCm (LUMI PyTorch container)
-- tectonic (LaTeX compilation)
+### Product order
 
-## Code Inventory
+\[
+P_N=M_1M_2\cdots M_N.
+\]
 
-| File | Purpose |
-|------|---------|
-| `cmf_generic.py` | Generic CMF construction, exact integer delta |
-| `spectral_delta.py` | Lyapunov spectrum computation (QR-based) |
-| `proxy_batch.py` | Batched proxy computation |
-| `gpu_proxy/proxy_kernel.py` | GPU proxy kernel (cupy/torch/numpy) |
-| `gpu_proxy/gpu_sweep.py` | Stage-1 GPU screening driver |
-| `gpu_proxy/params.py` | Deterministic parameter generation (bit-identical to GPU) |
-| `gpu_proxy/calibrate.py` | GPU calibration and parity checks |
-| `benchmark_proxy_vs_exact.py` | Reproducible benchmark: proxy vs exact |
-| `validation_holdout.py` | Five independent holdout validations |
-| `jstar_estimator.py` | J* estimator (blind, post-hoc, SV-based) |
-| `pslq_companion.py` | PSLQ integer relation identification |
-| `verify_survivors.py` | Stage-2 exact verification |
-| `sweep_zpm1.py` | Local z=+1/-1 sweep driver |
-| `deploy_zpm1_full.sh` | LUMI deployment (rsync + SLURM) |
-| `gpu_proxy/lumi_zpm1_positive_669.sbatch` | SLURM script for z=+1/-1 sweep |
-| `gpu_proxy/lumi_sweep_669.sbatch` | SLURM script for general sweeps |
+- Exact integer and multiprecision engines update `P = P @ M_n`.
+- QR propagates `M_n.T @ Q`, analyzing
+  `P_N.T = M_N.T ... M_1.T` and therefore the same singular spectrum.
 
-## Reproducible Commands
+### Observables
 
-### CPU Benchmark (any machine)
+The exact engine supports:
+
+1. one fixed ordered row pair `(i,j)`;
+2. the explicitly declared finite-family statistic
+   \(\delta_N^{\max}=\max_{i\ne j}\delta_N(e_i^T,e_j^T)\).
+
+The maximizing pair is saved. The second quantity is not silently treated as a
+fixed-observable theorem.
+
+### Finite-depth rank loss
+
+A trajectory is marked singular in the inspected range if
+
+\[
+f_i(n)=s_i+n d_i+1=0
+\]
+
+for some numerator root and integer step. This replaces the incorrect blanket
+filter `shift[i] == -1`.
+
+## Requirements
+
+```text
+Python >= 3.10
+numpy >= 1.24
+mpmath >= 1.3
+```
+
+GPU runs use the ROCm/PyTorch or CuPy stack supplied by the target LUMI
+container.
+
+## CPU regression suite
+
 ```bash
-python3 benchmark_proxy_vs_exact.py --dim 6 --n-candidates 2000 \
-    --depth 120 --box 6 --workers 8 --out benchmark_results.json
+python3 -m pip install -r requirements.txt
+python3 -m unittest discover -s tests -v
 ```
 
-### Validation Holdouts
+The suite checks product-order consistency, fixed versus maximum observables,
+dynamic numerator-root zero detection, and float32/float64 parity.
+
+## Corrected local benchmark
+
 ```bash
-python3 validation_holdout.py --dim 6 --n 500 --depth 120 --box 6 \
-    --workers 8 --out validation_results.json
+python3 benchmark_proxy_vs_exact.py \
+  --n-candidates 300 --n-exact 300 --depth 80 --workers 4 \
+  --out benchmark_results_corrected_filtered.json
 ```
 
-### J* Estimator
+The included small CPU regression used 163 production-eligible exact cases,
+with sign agreement 1.000 and MAE 0.00792. No positives occurred, so precision,
+recall and cost per hit are not estimable. The comparator is pure Python integer
+arithmetic, not GPU RNS.
+
+## Float32/float64 versus exact validation
+
 ```bash
-python3 jstar_estimator.py --mode posthoc --dim 6 --depth 120 \
-    --shift '[-2,-2,0,0,-2,0,-2,-2,-2,0,-2]' \
-    --dir '[0,0,0,0,0,0,0,0,0,1,0]' --z-num 7 --z-den 20
+python3 validation_precision.py \
+  --depth 50 --random 100 --attempts 3000 \
+  --boundary 0.15 --boundary-n 20 \
+  --out precision_validation_results_corrected.json
 ```
 
-### GPU Sweep (LUMI)
+Local regression results:
+
+| Stratum | n | float32 sign | float32 MAE | false negatives |
+|---|---:|---:|---:|---:|
+| Generic eligible | 100 | 1.000 | 0.01059 | 0 |
+| Boundary | 17 | 1.000 | 0.01010 | 0 |
+| Known nonsingular positive family | 5 | 1.000 | 0.03530 | 0 |
+
+These are code-regression results at depth 50. Submission requires a larger,
+production-depth GPU validation enriched near delta=0.
+
+## Corrected holdouts
+
 ```bash
-bash deploy_zpm1_full.sh sync     # rsync code
-bash deploy_zpm1_full.sh launch   # submit 16 waves
-bash deploy_zpm1_full.sh status   # check queue
-bash deploy_zpm1_full.sh fetch    # download survivors
+python3 validation_holdout.py \
+  --n 500 --depth 120 --workers 8 \
+  --out validation_results_corrected.json
 ```
 
-## LUMI Environment
+A smaller completed regression at depth 60 is included in the correction bundle.
+All eligible cases were negative; sign agreement was 1.000. The small-gap set
+had the largest error, as expected.
 
-- **Project:** project_465002669
-- **Container:** lumi-pytorch-rocm-6.0.3-python-3.12-pytorch-v2.3.1
-- **Hardware:** AMD MI250X, 64 GB HBM2e per GCD, 2 GCDs per module
-- **Billing:** 1 GPU-hour per MI250X module (2 GCDs)
-- **Throughput:** ~301k trajectories/s/GCD (float32, dim=6, N=120)
+## Apéry and reference-trajectory validation
 
-## Seeds
-
-| Seed | Purpose |
-|------|---------|
-| 20260626 | LUMI 6F5 sweep 1 (200B trajectories) |
-| 20270704 | LUMI 6F5 sweep 2 (200B trajectories) |
-| 99999 | Shard holdout validation |
-| 20260717 | z=+1/-1 boundary sweep |
-
-## Data Availability
-
-All trajectories are re-derivable from (seed, gid) using the deterministic parameter generator in `gpu_proxy/params.py`, which is bit-identical to the on-device GPU generator in `proxy_kernel.py`. Survivor manifests and verification certificates are available in the repository.
-
-## Citation
-
-```bibtex
-@software{deltaproxy2026,
-  author = {Vesterlund, David},
-  title = {Delta Proxy: Visible-Mode Lyapunov Geometry and Spectral Screening for CMFs},
-  url = {https://github.com/VesterlundCoder/deltaproxy},
-  year = {2026}
-}
+```bash
+python3 validate_apery.py --depths 100,500,1000
+python3 validate_reference_trajectories.py --depths 40,80,120
 ```
+
+The corrected Apéry calibration reproduces the expected convergence. For the
+nonsingular Hit-B trajectory at depth 120, the corrected finite-family statistic
+is approximately 0.143192 with maximizing pair `(1,3)`. The closest spectral
+ratio varies with depth and is not interpreted as an independent J* estimate.
+
+## GPU preflight
+
+```bash
+cd gpu_proxy
+python3 calibrate.py --dim 6 --backend torch --dtype float32 \
+  --nrank 120 --batches 200000,1000000,4000000 --repeats 5 \
+  --out gpu_calibration_r2.json
+
+python3 calibrate.py --dim 6 --backend torch --dtype float32 \
+  --nrank 120 --batches 200000,1000000,4000000 --repeats 5 \
+  --full-ladder --out gpu_calibration_full_ladder.json
+```
+
+The output must distinguish GCD-hours from MI250X-module-hours.
+
+## Corrected sweep and verification
+
+```bash
+python3 gpu_sweep.py --dim 6 --backend torch --dtype float32 \
+  --total 2000000000 --gid0 0 --batch 4000000 --nrank 120 \
+  --require-pos-lam1 --no-degenerate --out survivors.jsonl
+
+python3 verify_survivors.py --in survivors.jsonl --dim 6 --nverify 120 \
+  --workers 8 --all-out verified_all.jsonl --out confirmed.jsonl
+```
+
+Use `--full-ladder` only as a high-recall candidate generator. Its
+`k_candidate` field is not J*.
+
+## Sampling and resource arithmetic
+
+The corrected campaign design uses one fixed seed and disjoint absolute gid
+ranges. SplitMix still samples parameter space with replacement; it is not a
+bijective enumeration.
+
+For the proposed z=+1/-1 campaign:
+
+- finite parameter count: `13^11 * 19 * 2 = 68,102,094,973,406`;
+- proposed draws: `13,312,000,000,000`;
+- draw/cardinality ratio: about `19.55%`;
+- ideal iid expected unique fraction: about `17.76%`;
+- resources: `24,576 GCD-hours = 12,288 MI250X-module-hours`.
+
+These are projections, not completed results and not certified coverage.
+
+## Required submission reruns
+
+The following corrected artifacts are still required:
+
+1. Repeated synchronized LUMI throughput logs for r2-only and full-ladder modes.
+2. A matched GPU proxy versus GPU RNS run on identical candidates and depth.
+3. Production-depth float32 versus exact validation including substantial positive strata.
+4. Corrected large screening runs and complete `verified_all.jsonl` outputs.
+5. Deduplicated unique-trajectory counts and overlap analysis.
+6. Recomputed enrichment, end-to-end speedup and cost per confirmed hit.
+7. Public survivor manifests, exact certificates, raw logs and SHA-256 manifests.
+8. Independent observable-level visibility analysis for any claimed J*>2.
+
+Historical large-sweep statistics must not be used as final evidence without a
+corrected rerun or a demonstrated equivalence to the corrected product.
+
+## Archival release
+
+Before submission:
+
+1. freeze corrected production data;
+2. tag a release;
+3. create SHA-256 manifests;
+4. archive code, source, logs and result manifests on Zenodo or OSF;
+5. insert the DOI and release commit in the manuscript;
+6. obtain PI or external review of the theorem and observable setup.
