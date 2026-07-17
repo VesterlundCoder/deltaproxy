@@ -24,7 +24,7 @@ complete correction log and mandatory rerun plan.
 
 ### Matrix product
 
-All code now uses
+All corrected code uses
 
 \[
 P_N=M_1M_2\cdots M_N.
@@ -68,9 +68,6 @@ python3 benchmark_proxy_vs_exact.py \
 python3 validation_precision.py \
   --depth 80 --random 150 --attempts 3000 --boundary 0.05 --boundary-n 20 \
   --out precision_validation_results.json
-
-python3 validation_holdout.py \
-  --n 500 --depth 120 --workers 8 --out validation_results_corrected.json
 ```
 
 ## GPU preflight
@@ -91,19 +88,21 @@ estimate of `J*`.
 
 ## Repository map
 
-- `lyapunov_delta_proxy.tex` — revised manuscript source.
-- `cmf_generic.py` — companion matrices, exact right products, fixed-pair and
+- `SUBMISSION_READINESS_UPDATE.md` - complete correction log and rerun plan.
+- `cmf_generic.py` - companion matrices, exact right products, fixed-pair and
   finite-family deltas, finite-depth degeneracy checks.
-- `spectral_delta.py` — corrected right-product QR spectrum.
-- `proxy_batch.py` — batched NumPy/Torch-compatible spectrum.
-- `benchmark_proxy_vs_exact.py` — matched local CPU benchmark.
-- `validation_precision.py` — float32/float64 versus exact validation.
-- `validation_holdout.py` — structurally disjoint holdouts.
-- `jstar_estimator.py` — candidate-mode and post-hoc diagnostics with explicit
-  epistemic warnings.
-- `gpu_proxy/` — GPU kernel, sweep driver, exact verification and LUMI scripts.
-- `tests/` — product-order, observable, degeneracy and GPU/CPU parity tests.
-- `results/regression/` — small corrected local results; not production evidence.
+- `spectral_delta.py` - corrected right-product QR spectrum.
+- `proxy_batch.py` - corrected batched spectrum.
+- `benchmark_proxy_vs_exact.py` - corrected matched local CPU benchmark.
+- `validation_precision.py` - float32/float64 versus exact validation.
+- `gpu_proxy/proxy_kernel.py` - corrected right-product GPU kernel with optional
+  full-ladder output.
+- `gpu_proxy/gpu_sweep.py` - corrected sweep driver using disjoint gid ranges.
+- `tests/` - product-order, observable, degeneracy and parity tests.
+
+The fully revised manuscript source and compiled PDF are included in the
+correction bundle produced during the audit and should replace the current
+`lyapunov_delta_proxy.tex` only after PI review.
 
 ## Reproducibility and archival policy
 
