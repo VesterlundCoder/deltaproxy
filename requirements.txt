@@ -1,0 +1,5 @@
+numpy>=1.24
+mpmath>=1.3
+# Optional GPU backends are installed according to the target ROCm/CUDA stack:
+# torch
+# cupy-rocm-6-0
