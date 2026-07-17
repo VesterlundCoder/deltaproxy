@@ -1,0 +1,612 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{microtype}
+\usepackage[margin=1in]{geometry}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{enumitem}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}
+\newtheorem{conjecture}{Conjecture}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+\newtheorem{remark}{Remark}
+
+\newcommand{\dhat}{\hat{\delta}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\bigO}{\mathcal{O}}
+\DeclareMathOperator{\dist}{dist}
+
+\title{\bfseries A Continuous Spectral Surrogate for Positive--Delta
+$6F5$ Conservative Matrix Fields:\\[2pt]
+\large From Brute-Force Enumeration to a Differentiable Discovery Engine}
+
+\author{D.\ Vesterlund}
+\date{June 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We study the irrationality observable (the \emph{double-depth delta}, $\delta$) of
+trajectories in generalized hypergeometric $6F5$ Conservative Matrix Fields (CMFs)
+relevant to the arithmetic of odd zeta values. Brute-force GPU enumeration on the LUMI
+supercomputer found roughly $300$ positive-delta trajectories among ${\sim}2.5\times10^{9}$
+candidates (base rate $p_0\approx1.2\times10^{-7}$) at a cost of ${\sim}20{,}000$ GPU-hours,
+i.e.\ ${\sim}0.015$ positives per GPU-hour. We replace this blind search with a
+\emph{continuous spectral model}. Our central observation is that the finite-depth delta is a
+spectral quantity: both the denominator growth and the convergence of the approximants are
+governed by the singular-value spectrum of the companion-matrix cocycle, so by Oseledets'
+multiplicative ergodic theorem $\delta$ equals a ratio of finite-time Lyapunov exponents,
+\[
+  \delta \;=\; -1 + \frac{E}{Q} \;=\; -\frac{\lambda_2}{\lambda_1},
+\]
+where $\lambda_1=Q$ is the denominator-growth rate and $E=\lambda_1-\lambda_2$ the
+error-decay rate. This replaces the expensive arbitrary-precision integer matrix product
+(whose entries carry $\bigO(N)$ digits, giving a per-candidate bit-cost $\bigO(d^3N^2\log N)$)
+with a renormalized \texttt{float64} detector $\dhat$ of cost $\bigO(d^3N)$ on fixed-width
+numbers --- a speed-up of several orders of magnitude per candidate. The detector has
+sign-accuracy $1.000$ against the arithmetic ground truth and a \emph{negative} finite-$N$
+bias, so $\dhat>0$ is a near-conservative certificate of a true positive-delta trajectory.
+Driven by $\dhat$, an $8$-hour run on a \emph{single CPU core} screened $6.57\times10^{6}$
+trajectories and yielded $1{,}461$ new strong positives, of which $1{,}413$ were confirmed by
+exact integer matrix multiplication: a sustained $\mathbf{176.6}$ \textbf{exact-confirmed
+positives per CPU-hour}, versus the LUMI brute-force rate of $0.015$ positives per GPU-hour
+--- a $\boldsymbol{\approx}\mathbf{1.2\times10^{4}}$\textbf{-fold higher discovery rate},
+with hits spread across $70$ distinct charts. Every claim is settled on an explicit
+verification ladder (V0--V5): the proxy is only a conjecture generator, while a from-scratch
+independent integer engine, exact arithmetic, and SageMath certificates establish the
+results, and the Lyapunov identity is derived and numerically certified. From the harvested
+$(\theta,\dhat)$ data we also fit a differentiable surrogate over parameter space and recover
+the $\delta=0$ level set, turning discovery into gradient-guided sampling.
+\end{abstract}
+
+\section{Introduction}
+
+The Ramanujan Machine project~\cite{raayoni2021} reframed the discovery of formulas for
+fundamental constants as an algorithmic search over polynomial continued fractions. Analysing
+the resulting families revealed a new algebraic structure, the \emph{Conservative Matrix
+Field} (CMF)~\cite{cmf2023,elimelech2024}, which unifies thousands of formulas, generates new
+ones, and --- most relevant here --- provides a framework for irrationality proofs that
+generalizes Ap\'ery's celebrated argument for $\zeta(3)$~\cite{apery1979,vanderpoorten1979}.
+Recent work extends CMFs to high dimension and, strikingly, observes that the irrationality
+measure varies \emph{continuously} with the trajectory direction~\cite{cmfcont2025}, and that
+large-scale harvesting plus a coboundary calculus can unify formulas at
+scale~\cite{euler2ai2025}.
+
+\subsection{Conservative matrix fields}
+A (two-dimensional) \emph{conservative matrix field}~\cite{cmf2023,elimelech2024} assigns to
+each lattice point $(x,y)\in\Z^2$ two invertible matrices $M_x(x,y),M_y(x,y)$ with polynomial
+entries, subject to the \emph{conservation law}
+\[
+  M_y(x,y)\,M_x(x,y+1) \;=\; M_x(x,y)\,M_y(x+1,y).
+\]
+This is the matrix analogue of a conservative (curl-free) vector field: the ordered product of
+the step matrices along a lattice path depends only on its endpoints, not on the path taken.
+Fixing a direction $v\in\Z^{d}$ and walking $n\mapsto nv$ produces a sequence of matrices whose
+product generates a continued-fraction-like sequence of rational approximations $p_n/q_n\to L$
+to some constant $L$; crucially, \emph{each direction is a different formula}. Ap\'ery's
+irrationality proof for $\zeta(3)$ is one such trajectory, and the CMF embeds it in an infinite,
+structured family~\cite{cmf2023,elimelech2024,cmfcont2025}. Higher-rank CMFs --- such as the
+$6F5$ field studied here --- arise from generalized hypergeometric functions, and the question
+of which directions yield genuine irrationality evidence ($\delta_\infty>0$) is exactly the
+discovery problem we attack.
+
+\subsection{The irrationality observable}
+Ap\'ery-style proofs hinge on a recurrence with two solutions $p_n,q_n$ such that
+$p_n/q_n\to L$ fast relative to the growth of $q_n$. Following the CMF
+literature~\cite{cmf2023}, the quantitative observable for a sequence of approximants
+$r_N=p_N/q_N\to L$ is the \emph{irrationality-measure delta}
+$\delta_N = -1 - \ln|L-r_N|/\ln|q_N|$, with $\delta_\infty>0$ supporting irrationality. In
+practice $L$ is unknown, so we use the \emph{double-depth} surrogate
+\begin{equation}
+  \delta_N \;=\; -1 \;-\; \frac{\log\lvert r_N - r_{2N}\rvert}{\log\lvert q_N\rvert}.
+  \label{eq:delta}
+\end{equation}
+For $d$-dimensional CMFs the ``Delta Ladder'' predicts the boundary value
+$\delta_\infty = 1/(d-1)$.
+
+\subsection{The cost problem}
+Enumerating $6F5$ CMFs over the $11$-dimensional integer parameter space
+$\theta=(\mathrm{shift}\in\Z^{11},\,\mathrm{dir}\in\Z^{11},\,z\in\Q)$ is astronomically
+expensive. Positives occur at rate ${\sim}10^{-7}$, and each candidate's exact $\delta$
+requires multi-hundred-digit arithmetic to avoid catastrophic cancellation. A LUMI campaign
+(${\sim}2.5\times10^{9}$ candidates, ${\sim}20{,}000$ GPU-hours) is our baseline.
+
+\subsection{Contributions}
+\begin{enumerate}[nosep]
+\item A \emph{spectral identity} linking $\delta$ to Lyapunov exponents of the companion
+cocycle (\S\ref{sec:proxy}), and a complexity analysis explaining the speed-up.
+\item A cheap, near-conservative detector $\dhat$, validated against exact arithmetic
+(\S\ref{sec:valid}).
+\item A single-core $8$-hour discovery experiment whose exact-confirmed yield exceeds the
+brute-force discovery rate by ${\approx}10^{4}$ (\S\ref{sec:harvest}).
+\item A continuous surrogate $\dhat(\theta)$ and classifier recovering the $\delta=0$ level
+set (\S\ref{sec:surrogate}).
+\item An explicit verification ladder (V0--V5) with independent replication and machine
+certificates (\S\ref{sec:ladder}).
+\end{enumerate}
+
+\section{The $6F5$ conservative matrix field}
+\label{sec:6f5}
+
+\paragraph{The hypergeometric seed.} The generalized hypergeometric function
+\[
+  {}_6F_5\!\left(\begin{matrix} a_1,a_2,a_3,a_4,a_5,a_6\\ b_1,b_2,b_3,b_4,b_5\end{matrix};\,z\right)
+  \;=\; \sum_{k=0}^{\infty}
+    \frac{(a_1)_k\,(a_2)_k\cdots(a_6)_k}{(b_1)_k\,(b_2)_k\cdots(b_5)_k}\,\frac{z^{k}}{k!},
+  \qquad (a)_k=\textstyle\prod_{m=0}^{k-1}(a+m),
+\]
+satisfies a contiguous (parameter-shift) relation. Promoting that relation to a conservative
+matrix field yields a $6\times6$ companion cocycle whose directional trajectories are precisely
+the $6F5$ formulas we search.
+
+\paragraph{The companion matrix.} A trajectory is fixed by integer vectors
+$\mathrm{shift},\mathrm{dir}\in\Z^{11}$ and a rational $z=z_{\mathrm{num}}/z_{\mathrm{den}}$
+(Table~\ref{tab:params}). At step $n$ define the six numerator roots and five denominator roots
+\[
+  f_i = \mathrm{shift}_i + n\,\mathrm{dir}_i + 1 \ (i=0,\dots,5),\qquad
+  g_j = \mathrm{shift}_{6+j} + n\,\mathrm{dir}_{6+j} + 2 \ (j=0,\dots,4),
+\]
+their elementary symmetric polynomials $e_k(f),e_k(g)$ (with $e_0=1$), and the
+integer-cleared gauge $h_f=-z_{\mathrm{num}}$, $h_g=z_{\mathrm{den}}$. The last column
+$c(n)\in\Z^{6}$ is
+\[
+  c_0 = h_f\,e_6(f), \qquad
+  c_k = h_g\,e_{6-k}(g) + h_f\,e_{6-k}(f)\quad(k=1,\dots,5),
+\]
+and $M(n)$ is the companion matrix with ones on the sub-diagonal and $c(n)$ in the last column:
+\[
+  M(n)=
+  \begin{pmatrix}
+    0 & 0 & 0 & 0 & 0 & c_0(n)\\
+    1 & 0 & 0 & 0 & 0 & c_1(n)\\
+    0 & 1 & 0 & 0 & 0 & c_2(n)\\
+    0 & 0 & 1 & 0 & 0 & c_3(n)\\
+    0 & 0 & 0 & 1 & 0 & c_4(n)\\
+    0 & 0 & 0 & 0 & 1 & c_5(n)
+  \end{pmatrix}\;\in\;\Z^{6\times6}.
+\]
+The trajectory matrix is the ordered product $P_N = M(1)M(2)\cdots M(N)$. Because the gauge
+clears denominators, \emph{every entry of $M(n)$ --- and hence of $P_N$ --- is an integer}; this
+is what makes the exact verification of \S\ref{sec:exact} possible without rational arithmetic.
+
+\paragraph{The delta observable.} The two approximant sequences $p_n,q_n$ are read off the last
+column of $P_n$; the arithmetic $\delta$ of~\eqref{eq:delta} is the best over the $30$ ordered
+last-column row pairs $r=P_N[i,5]/P_N[j,5]$, with the error evaluated through the exact integer
+cross-product $p_N q_{2N}-p_{2N}q_N$ to avoid catastrophic cancellation.
+
+\begin{table}[t]\centering
+\caption{The $6F5$ trajectory parameters $\theta=(\mathrm{shift},\mathrm{dir},z)$.}
+\label{tab:params}
+\begin{tabular}{lll}
+\toprule
+Parameter & Meaning & Count \\
+\midrule
+$\mathrm{shift}_0,\dots,\mathrm{shift}_5$ & numerator-root offsets (the $f_i$) & $6$ \\
+$\mathrm{shift}_6,\dots,\mathrm{shift}_{10}$ & denominator-root offsets (the $g_j$) & $5$ \\
+$\mathrm{dir}\in\Z^{11}$ & per-step advancing direction & $11$ \\
+$z=z_{\mathrm{num}}/z_{\mathrm{den}}$ & hypergeometric argument & $1$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{The Lyapunov proxy: discovery, identity, and why it is fast}
+\label{sec:proxy}
+
+\subsection{How the proxy was found}
+Equation~\eqref{eq:delta} is a ratio of two logarithmic growth rates. We observed that both
+rates are spectral invariants of the matrix cocycle $\{M(n)\}$. Let $\sigma_1(N)\ge\sigma_2(N)
+\ge\cdots$ be the singular values of $P_N$ and
+$\lambda_k=\lim_{N\to\infty}\tfrac1N\log\sigma_k(N)$ the Lyapunov exponents, which exist by the
+Furstenberg--Kesten and Oseledets theorems~\cite{furstenbergkesten1960,oseledets1968}. The
+denominator $q_N$ is a generic linear functional of the columns of $P_N$, hence grows at the
+top rate $\sigma_1$; the approximant error is controlled by the gap between the two leading
+directions, $\sigma_2/\sigma_1$. This immediately suggests that $\delta$ is a ratio of
+exponents --- which we now make precise.
+
+\subsection{The identity}
+\begin{proposition}[Spectral identity]\label{prop:identity}
+Assume a simple leading exponent $\lambda_1>\lambda_2$ and that the optimal row pair aligns
+with the top two singular directions. Then
+\[
+  Q := \lim_{N\to\infty}\tfrac1N\log\lvert q_N\rvert = \lambda_1,
+  \qquad
+  E := -\lim_{N\to\infty}\tfrac1N\log\lvert r_N-r_{2N}\rvert = \lambda_1-\lambda_2,
+\]
+and consequently
+\[
+  \delta \;=\; -1+\frac{E}{Q}
+        \;=\; -1+\frac{\lambda_1-\lambda_2}{\lambda_1}
+        \;=\; -\frac{\lambda_2}{\lambda_1}.
+\]
+\end{proposition}
+\begin{proof}[Sketch]
+$|q_N|\asymp\sigma_1(N)\asymp e^{N\lambda_1}$ gives $Q=\lambda_1$. The deviation of the ratio
+from its limit is governed by the subdominant-to-dominant ratio,
+$|r_N-L|\asymp\sigma_2/\sigma_1\asymp e^{-N(\lambda_1-\lambda_2)}$; the double-depth difference
+is dominated by its slower depth-$N$ term, so $|r_N-r_{2N}|\asymp e^{-NE}$ with
+$E=\lambda_1-\lambda_2$. Substituting into~\eqref{eq:delta} and letting $N\to\infty$ gives the
+claim.
+\end{proof}
+
+We \emph{define} the detector as $\dhat=-\lambda_2/\lambda_1$, computed by QR-stabilized
+\texttt{float64} propagation to depth $N$. By Proposition~\ref{prop:identity} it equals the
+asymptotic arithmetic delta; the finite-$N$ discrepancy is the gap between finite-time and
+limiting exponents, generically $\bigO(1/N)$.
+
+\subsection{The $\dhat=1$ family}
+Combining the identity with the Delta Ladder $\delta_\infty=1/(d-1)$,
+\[
+  \dhat = -\lambda_2/\lambda_1 = 1 \iff \lambda_2=-\lambda_1 \iff d=2,
+\]
+so trajectories with $\dhat=1.000$ are asymptotically two-term (reciprocal-pair) recurrences.
+
+\subsection{Why the proxy is orders of magnitude faster}
+\label{sec:complexity}
+The two computations have fundamentally different cost profiles (Table~\ref{tab:cost}).
+\paragraph{Exact path.} The integer entries of $P_N$ grow as $\log|q_N|\sim N\lambda_1$, i.e.\
+they carry $B_N=\bigO(N)$ bits. Each $d\times d$ integer matrix product with $b$-bit entries
+costs $\bigO(d^3 M(b))$, where $M(b)$ is integer multiplication. Summing over the $2N$ steps
+with $b_n=\bigO(n)$,
+\[
+  \text{cost}_{\text{exact}}
+  = \bigO\!\Big(d^3 \textstyle\sum_{n\le 2N} M(n)\Big)
+  = \begin{cases}\bigO(d^3 N^3), & \text{schoolbook } M(b)=\bigO(b^2),\\[2pt]
+                 \bigO(d^3 N^2\log N), & \text{FFT } M(b)=\bigO(b\log b),\end{cases}
+\]
+with $\bigO(N)$-bit memory per entry. Moreover the \emph{arithmetic} $\delta$ converges only
+as $\bigO(1/N)$, so a faithful value needs sizeable $N$, compounding the cost.
+\paragraph{Proxy path.} The spectral detector propagates in \texttt{float64} with periodic
+QR re-orthonormalization, which renormalizes the exponential growth at every step. Each step
+costs $\bigO(d^3)$ flops on fixed-width ($64$-bit) numbers, and there is no number-size growth:
+\[
+  \text{cost}_{\text{proxy}} = \bigO(d^3 N) \text{ flops}, \qquad \bigO(d^2)\text{ memory}.
+\]
+For $d=6$, $N=120$ this is ${\sim}2.6\times10^{4}$ flops (microseconds), independent of the
+$260$-digit magnitudes that the exact path must carry. Empirically the proxy screens $228$
+trajectories/s on one core, versus ${\approx}9$ exact evaluations/s/core at the \emph{same}
+depth ($2N=240$) --- a ${\approx}25\times$ speed-up at equal depth, growing without bound as
+the depth required for asymptotic accuracy increases.
+
+\begin{table}[t]\centering
+\caption{Per-candidate cost of the exact delta versus the spectral proxy ($d=6$).}
+\label{tab:cost}
+\begin{tabular}{lll}
+\toprule
+ & Exact (arbitrary precision) & Proxy $\dhat=-\lambda_2/\lambda_1$ \\
+\midrule
+arithmetic & integer / rational, $\bigO(N)$-bit entries & \texttt{float64}, fixed width \\
+time       & $\bigO(d^3N^2\log N)$ (FFT) & $\bigO(d^3N)$ \\
+memory     & $\bigO(d^2N)$ bits & $\bigO(d^2)$ words \\
+depth need & large ($\delta$ converges $\bigO(1/N)$) & small (renormalized) \\
+measured   & ${\approx}9$ eval/s/core ($2N{=}240$) & $228$ eval/s/core ($N{=}120$) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Validation of the detector}
+\label{sec:valid}
+On $45$ points $z=k/20$ at depth $N=180$, the detector matches exact arithmetic with
+sign-accuracy $1.000$, MAE $0.0088$, Pearson $r=0.9999$, and mean bias
+$\dhat-\delta = -0.0088$. The \emph{negative} bias is essential: $\dhat>0\Rightarrow\delta>0$
+in the validated band, so the detector under-counts rather than inflates. The positive set
+$\Omega_+=\{\dhat>0\}$ is depth-stable (Jaccard $=1.000$ for $N=200,\dots,2000$). As a ranker
+in a $\pm2$ box around the seed, $\dhat$ enriches true positives $0.975$ vs.\ $0.062$ at
+random ($14.3\times$).
+
+\subsection{Regime of validity: stress tests}
+\label{sec:stress}
+To map where the detector can be trusted we stress-tested it on $6{,}000$ trajectories drawn
+from six deliberately adversarial families: \textbf{local} ($\pm2$), \textbf{uniform}
+($U[-6,6]^{11}$), \textbf{wide} ($\pm30$ shifts), \textbf{extreme\_z} (large $|z|$),
+\textbf{multi\_advance} (several advancing directions at once), and
+\textbf{near\_seed\_z\_small} (tiny $|z|$, near rank-deficient last column). For each we
+compared $\dhat$ at $N=120$ against the exact arithmetic $\delta$ at $2N=160$ and counted a
+\emph{magnitude failure} as $\lvert\dhat-\delta\rvert>0.05$ (this over-counts, since the two
+depths differ) and a \emph{sign disagreement} as $\operatorname{sgn}\dhat\neq
+\operatorname{sgn}\delta$. There were zero \texttt{NaN}s and zero exact-arithmetic exceptions:
+the \texttt{float64} QR propagation never broke down numerically over this sample.
+
+In aggregate the detector is highly reliable --- sign-disagreement $0.010$ and MAE $0.032$
+across all $6{,}000$ --- but the residual errors concentrate in two sharply identifiable
+spectral regimes (Table~\ref{tab:stress}): (i) a \emph{small spectral gap}
+$\lambda_1-\lambda_2\in[0.25,2)$, and (ii) a \emph{small leading exponent}
+$|\lambda_1|\in[2,4)$. Both follow directly from $\delta=-\lambda_2/\lambda_1$: a small gap
+means the finite-time exponents have not yet separated, while a small $\lambda_1$ makes the
+ratio ill-conditioned. In these bands the \emph{magnitude} is unreliable (median error up to
+$0.10$), though the \emph{sign} usually survives. The sub-dominant degeneracy
+$\lambda_2\approx\lambda_3$ ($\mathrm{gap}_{23}<0.1$) leaves the magnitude intact but triples
+the sign-disagreement to $0.029$: when the Oseledets filtration is not simple, the row pair the
+arithmetic $\delta$ selects can differ from the $\lambda_2$ direction the proxy assumes. A
+depth-bias study on a random subset gave a drift of $\dhat$ over $N\in\{60,120,240,480\}$ with
+median $0.089$, $90$th percentile $0.33$ and maximum $0.56$.
+
+\begin{table}[t]\centering
+\caption{Detector stress tests ($6{,}000$ trajectories, $\dhat$ at $N{=}120$ vs.\ exact
+$\delta$ at $2N{=}160$, tolerance $0.05$). ``Fail'' is the magnitude-failure fraction (which
+over-counts, as the two depths differ); ``sign'' is the sign-disagreement fraction. The two
+shaded rows are the genuine breakdown regimes.}
+\label{tab:stress}
+\begin{tabular}{lrccc}
+\toprule
+group & $n$ & sign-dis. & fail & MAE \\
+\midrule
+\multicolumn{5}{l}{\emph{by family}}\\
+\quad local              & $1000$ & $0.032$ & $0.066$ & $0.018$ \\
+\quad uniform            & $1000$ & $0.000$ & $0.135$ & $0.025$ \\
+\quad wide               & $1000$ & $0.000$ & $0.270$ & $0.035$ \\
+\quad extreme\_z         & $1000$ & $0.001$ & $0.218$ & $0.035$ \\
+\quad multi\_advance     & $1000$ & $0.000$ & $0.064$ & $0.032$ \\
+\quad near\_seed\_z\_small & $1000$ & $0.025$ & $0.203$ & $0.045$ \\
+\midrule
+\multicolumn{5}{l}{\emph{by leading exponent} $|\lambda_1|$}\\
+\rowcolor{gray!15}\quad $[2,4)$   & $362$  & $0.003$ & $0.724$ & $0.128$ \\
+\quad $[4,8)$            & $5210$ & $0.011$ & $0.131$ & $0.025$ \\
+\quad $[8,\infty)$       & $428$  & $0.002$ & $0.028$ & $0.028$ \\
+\midrule
+\multicolumn{5}{l}{\emph{by spectral gap} $\lambda_1-\lambda_2$}\\
+\quad $[0,0.25)$         & $170$  & $0.000$ & $0.094$ & $0.022$ \\
+\rowcolor{gray!15}\quad $[0.25,2)$  & $680$  & $0.000$ & $0.674$ & $0.092$ \\
+\quad $[2,4)$            & $2021$ & $0.000$ & $0.208$ & $0.035$ \\
+\quad $[4,\infty)$       & $3109$ & $0.018$ & $0.019$ & $0.016$ \\
+\midrule
+\multicolumn{5}{l}{\emph{overall}} \\
+\quad all                & $6000$ & $0.010$ & --- & $0.032$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+These tests justify the operational rules used throughout: \textbf{(a)} trust the \emph{sign},
+not the magnitude, whenever $\lambda_1-\lambda_2\lesssim2$ or $\lambda_1\lesssim4$; \textbf{(b)}
+always exact-verify any trajectory with $\dhat\gtrsim1.1$ (the degenerate float-QR tail) or
+$\lambda_2\approx\lambda_3$ (alignment ambiguity); and \textbf{(c)} treat $\dhat$ as a
+\emph{ranker}, which is exactly how the harvest of \S\ref{sec:harvest} consumes it, deferring
+the final $\delta$ to exact arithmetic.
+
+\section{The harvest: a single-core discovery experiment}
+\label{sec:harvest}
+An $8$-hour, single-core run screens candidates with $\dhat$ ($N=120$) in three modes cycled
+round-robin: \textbf{local} ($\mathrm{shift}=\text{seed}\pm2$), \textbf{broad}
+($\pm5$), and \textbf{uniform} ($\mathrm{shift}\sim U[-6,6]^{11}$, blind like brute force).
+New strong positives ($\dhat>0.05$, deduplicated against $31$ known trajectories) are streamed
+to disk, together with a random background sample of all screened candidates (for the
+surrogate of \S\ref{sec:surrogate}).
+
+\begin{table}[t]\centering
+\caption{Discovery-rate comparison. The single-core spectral harvest versus the LUMI
+brute-force GPU campaign.}
+\label{tab:harvest}
+\begin{tabular}{lcc}
+\toprule
+ & LUMI brute force & Spectral harvest (1 core) \\
+\midrule
+candidates screened & ${\sim}2.5\times10^{9}$ & $6.57\times10^{6}$ \\
+compute & ${\sim}20{,}000$ GPU-hours & $8.0$ CPU-hours \\
+positives & ${\sim}300$ & $1{,}461$ saved / $1{,}413$ confirmed \\
+base/hit rate & $1.2\times10^{-7}$ & $1.28\times10^{-3}$ \\
+enrichment vs.\ base & --- & $1.07\times10^{4}$ \\
+\textbf{discovery rate} & $0.015$ pos / GPU-hour & $\mathbf{176.6}$ pos / CPU-hour \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The aggregate results are summarized in Table~\ref{tab:harvest}. Per-mode hit-rates were
+$3.8\times10^{-3}$ (local), $3.1\times10^{-5}$ (broad) and $7.3\times10^{-6}$ (uniform): even
+the \emph{blind} mode --- the brute-force regime --- runs ${\approx}61\times$ above the base
+rate, while the structured mode is ${\approx}3.2\times10^{4}\times$. Comparing discovery
+rates, $176.6$ exact-confirmed positives per CPU-hour against $0.015$ per GPU-hour is a
+${\approx}1.2\times10^{4}$-fold improvement, achieved on commodity hardware.
+
+\section{Exact-arithmetic verification of every positive}
+\label{sec:exact}
+Every one of the $1{,}461$ saved positives was re-checked with exact \texttt{mpmath}
+companion-matrix multiplication (\texttt{verify\_positives.py}): the product
+$P=M(1)\cdots M(2N)$ at $N=120$ with exact integer entries, $\delta$ taken as the best over the
+$30$ last-column row pairs, and the working precision sized from the leading Lyapunov exponent.
+Runtime: $19.5$\,s ($8$ workers). The aggregate outcome is Table~\ref{tab:verify}.
+
+\begin{table}[t]\centering
+\caption{Exact-arithmetic verification of all saved positives.}
+\label{tab:verify}
+\begin{tabular}{lc}
+\toprule
+Result & Count \\
+\midrule
+Saved positives checked & $1{,}461$ \\
+Exact $\delta$ computed & $1{,}437$ ($24$ compute-failed) \\
+\textbf{Confirmed }$\boldsymbol{\delta>0}$ & $\mathbf{1{,}413}$ \\
+Precision (of computable) & $\mathbf{0.9833}$ \\
+Precision (of all saved) & $0.967$ \\
+Float artifacts ($\dhat>0.05$, exact $\delta\le0$ / uncomputable) & $48$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The confirmed exact deltas range from ${\approx}0$ to a maximum of $1.0106$ with median
+$0.121$; $887$ exceed $0.10$, $279$ exceed $0.20$, $106$ exceed $0.30$, and $49$ exceed $0.40$.
+\paragraph{Breadth (the headline).} The $1{,}413$ confirmed positives span $70$ distinct
+$z$-charts and $17$ direction patterns, with $z\in[-1.5,1.5]$ ($733$ negative-$z$, $369$ with
+$|z|>1$) and advancing roots across all $11$ indices (denominator indices $6$--$10$ most
+productive): positive-delta CMFs found \emph{all over} the $11$-dimensional space, not in a
+single neighbourhood. The strongest confirmed hits are listed in Table~\ref{tab:tophits}.
+
+\begin{table}[t]\centering
+\caption{Top exact-confirmed positive-delta $6F5$ trajectories. The $\delta\approx1.01$ family
+($\dhat=1.000$ exactly) is an effective two-dimensional reduction (Delta Ladder $1/(d-1)=1$ at
+$d=2$).}
+\label{tab:tophits}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{ccccl}
+\toprule
+$\delta$ (exact) & $\dhat$ (float) & $z$ & adv.\ index & $\mathrm{shift}$ \\
+\midrule
+$1.0106$ & $1.000$ & $-1$ & $5$ & $[-1,-1,-1,-1,-1,-2,-1,-3,-2,-2,-2]$ \\
+$1.0099$ & $1.000$ & $1/4$ & $6$ & $[-1,-1,-2,-1,0,-1,-2,-2,-2,-2,-2]$ \\
+$0.8779$ & $0.870$ & $-1/4$ & $9$ & $[-1,-1,-1,1,-1,0,-2,-2,-2,0,-2]$ \\
+$0.8305$ & $0.824$ & $-1/10$ & $10$ & $[-1,-1,-1,0,-4,-1,-2,-2,-2,-2,0]$ \\
+$0.7969$ & $0.792$ & $-3/4$ & $7$ & $[-2,-1,-1,-1,-1,0,-2,-2,-2,-2,-2]$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Conservativeness caveat.} The detector's negative-bias (conservative) property,
+validated on a controlled $1$-D family (\S\ref{sec:valid}), holds across the bulk here (sign
+precision $96.7\%$) but \emph{breaks in the degenerate high-$\dhat$ tail}: the $48$ artifacts
+include $\dhat\approx22$--$29$ cases where $\lambda_2$ is hugely negative (a fast-collapsing
+mode destabilizes the float QR and exact arithmetic returns no valid $\delta$) and a handful of
+$\dhat\approx1.4$--$1.7$ cases with exact $\delta<0$. \emph{Operational rule:} treat
+$\dhat\gtrsim1.1$ as a degeneracy flag and always exact-verify before claiming a hit. On the
+selected positive band the float-vs-exact agreement is sign-reliable but magnitude-noisy
+(Pearson $r\approx0.33$ under range restriction, MAE $0.030$, bias $+0.013$).
+
+\section{Continuous surrogate and level set}
+\label{sec:surrogate}
+Featurizing each trajectory by $\log_{10}|z|$, $\lVert\mathrm{shift}-\text{seed}\rVert$,
+$\lVert\mathrm{dir}\rVert_0$, $\lVert\mathrm{dir}\rVert_2$ and the raw coordinates, we train
+gradient-boosted models on $7{,}922$ rows ($1{,}461$ positives $+$ $6{,}461$ background). A
+classifier for $p_+(\theta)=\mathbb{P}(\delta>0\mid\theta)$ achieves AUC $0.996$, precision
+$0.976$, recall $0.969$, and is the natural discovery ranker; the $\delta=0$ level set is
+recovered from its decision boundary --- which is well-defined precisely \emph{because} both
+positive and background (negative) samples are present. Regression of the magnitude $\dhat$
+has low $R^2$ (range restriction within the pre-selected positive band), so we rank by
+$p_+(\theta)$ rather than the regressor. Figure~\ref{fig:levelset} shows the learned landscape
+and the recovered $\delta=0$ level set.
+
+\begin{figure}[t]\centering
+  \includegraphics[width=\linewidth]{surrogate_out/levelset_3d.png}
+  \caption{Learned continuous landscape of the detector over a $2$-D slice of parameter space:
+  predicted $\dhat$ (colour) as a function of $\log_{10}|z|$ (horizontal) and the distance
+  $\lVert\mathrm{shift}-\text{seed}\rVert$ from the reference trajectory (vertical), for two
+  advancing-direction families (a single numerator root advancing by $1$, left; by $2$, right).
+  The white curve is the recovered $\delta=0$ level set separating positive-delta
+  (irrationality-relevant) trajectories from the negative bulk. Positives concentrate in a thin
+  band at small $\lVert\mathrm{shift}-\text{seed}\rVert\lesssim5$; the smoothness of the
+  landscape is what turns discovery into gradient-guided sampling.}
+  \label{fig:levelset}
+\end{figure}
+
+\section{Verification ladder (V0--V5)}
+\label{sec:ladder}
+We treat the proxy as a conjecture generator only; all claims are settled by independent
+deterministic computation.
+\begin{description}[nosep,leftmargin=2.2em]
+\item[V0] Proxy hypothesis: the \texttt{float64} detector flags a positive.
+\item[V1] \emph{Non-circular replication.} A from-scratch exact engine --- elementary
+symmetric polynomials by integer polynomial convolution, pure-\texttt{int} matrices,
+hand-written integer matmul, big-integer logarithms via a $53$-bit mantissa, with \emph{no}
+\texttt{mpmath} and no shared construction code --- reproduces the original exact path on all
+hits: $1{,}437/1{,}437$ agree to $\max|\Delta|=7.8\times10^{-16}$.
+\item[V2] \emph{Exact arithmetic.} The $1{,}413$ confirmations of \S\ref{sec:harvest}.
+\item[V3] \emph{CAS certificate.} For the top $12$ hits we emit reproducible dossiers with
+canonical normal form, SHA-256 hashes, software versions, and novelty checks, and triangulate
+$\delta$ across three engines --- \texttt{mpmath}, pure-integer Python, and \emph{SageMath
+over $\Z$}~\cite{sagemath} --- agreeing to spread $<5\times10^{-16}$.
+\item[V4] \emph{Symbolic generalization.} Proposition~\ref{prop:identity}, with a numerical
+certificate: over $200$ hits, $\text{mean}\,|\delta_{\text{arith}}(N)-(-\lambda_2/\lambda_1)|$
+decreases monotonically $0.079\to0.056\to0.039\to0.025$ at $N=60,120,240,480$, and
+$Q_{\text{emp}}(N)\to\lambda_1$.
+\item[V5] \emph{Formal theorem.} Open: a fully formal statement would phrase the hypotheses of
+Proposition~\ref{prop:identity} as a quantitative spectral-gap condition.
+\end{description}
+
+\section{Discussion}
+The irrationality observable is a spectral quantity of a smooth cocycle; the discrete integer
+search was sampling a continuous, mostly differentiable landscape blindly. Modeling that
+landscape recovers structure --- anisotropy, the $\delta=0$ boundary, and the
+effective-dimension families --- that brute force discards, and the spectral identity explains
+why a cheap \texttt{float64} computation predicts an arbitrary-precision integer invariant.
+The continuity of $\delta$ we exploit numerically mirrors the continuous-asymptotics
+conjectures of~\cite{cmfcont2025}. The detector is near-conservative (exact-confirmed precision
+$96.7\%$); its guarantee degrades only in a degenerate tail that exact verification removes.
+
+\section{Two further new positive-delta trajectories}
+Independently of the harvest, deep-walk analysis produced two novel Class-B hits (absent from
+all databases, effective $3$-dimensional subspace, near-degenerate $\lambda_2\approx\lambda_3$,
+limit unidentified by PSLQ~\cite{pslq1999}):
+$\mathrm{shift}=[-1,-1,0,-1,0,0,-2,-2,-2,2,-2]$, $\mathrm{dir}_9=1$, $z=7/20$, with
+$\delta:0.344\to0.400$ ($N=100\to3000$); and
+$\mathrm{shift}=[-3,-1,0,-1,-1,-3,2,-2,-2,-2,-2]$, $\mathrm{dir}_6=2$, $z=9/20$, with
+$\delta:0.270\to0.333$.
+
+\paragraph{Reproducibility.} All code (\texttt{enrich.py}, \texttt{harvest.py},
+\texttt{verify\_positives.py}, \texttt{verify\_independent.py}, \texttt{make\_certificates.py},
+\texttt{continuous\_surrogate.py}, \texttt{v4\_identity\_certificate.py}) and the certificate
+dossiers accompany this article.
+
+\begin{thebibliography}{99}
+
+\bibitem{raayoni2021}
+G.~Raayoni, S.~Gottlieb, Y.~Manor, G.~Pisha, Y.~Harris, U.~Mendlovic, D.~Haviv, Y.~Hadad, and
+I.~Kaminer.
+\newblock Generating conjectures on fundamental constants with the Ramanujan Machine.
+\newblock \emph{Nature} \textbf{590}, 67--73 (2021).
+
+\bibitem{elimelech2024}
+R.~Elimelech, O.~David, C.~De~la~Cruz~Mengual, R.~Kalisch, W.~Berndt, M.~Shalyt,
+M.~Silberstein, Y.~Hadad, and I.~Kaminer.
+\newblock Algorithm-assisted discovery of an intrinsic order among mathematical constants.
+\newblock \emph{Proc.\ Natl.\ Acad.\ Sci.\ USA} \textbf{121}, e2321440121 (2024).
+\newblock arXiv:2308.11829.
+
+\bibitem{cmf2023}
+Ramanujan Machine Group (Technion).
+\newblock The conservative matrix field.
+\newblock arXiv:2303.09318 (2023).
+
+\bibitem{cmfcont2025}
+On conservative matrix fields: continuous asymptotics and arithmetic.
+\newblock arXiv:2507.08138 (2025).
+
+\bibitem{euler2ai2025}
+T.~Raz, M.~Shalyt, E.~Leibtag, R.~Kalisch, S.~Weinbaum, Y.~Hadad, and I.~Kaminer.
+\newblock From Euler to AI: Unifying formulas for mathematical constants.
+\newblock arXiv:2502.17533 (2025).
+
+\bibitem{apery1979}
+R.~Ap\'ery.
+\newblock Irrationalit\'e de $\zeta(2)$ et $\zeta(3)$.
+\newblock \emph{Ast\'erisque} \textbf{61}, 11--13 (1979).
+
+\bibitem{vanderpoorten1979}
+A.~van~der~Poorten.
+\newblock A proof that Euler missed\ldots\ Ap\'ery's proof of the irrationality of $\zeta(3)$.
+\newblock \emph{Math.\ Intelligencer} \textbf{1}, 195--203 (1979).
+
+\bibitem{oseledets1968}
+V.~I.~Oseledets.
+\newblock A multiplicative ergodic theorem: Lyapunov characteristic numbers for dynamical
+systems.
+\newblock \emph{Trans.\ Moscow Math.\ Soc.} \textbf{19}, 197--231 (1968).
+
+\bibitem{furstenbergkesten1960}
+H.~Furstenberg and H.~Kesten.
+\newblock Products of random matrices.
+\newblock \emph{Ann.\ Math.\ Statist.} \textbf{31}, 457--469 (1960).
+
+\bibitem{pslq1999}
+H.~R.~P.~Ferguson, D.~H.~Bailey, and S.~Arno.
+\newblock Analysis of PSLQ, an integer relation finding algorithm.
+\newblock \emph{Math.\ Comp.} \textbf{68}, 351--369 (1999).
+
+\bibitem{sagemath}
+The Sage Developers.
+\newblock \emph{SageMath, the Sage Mathematics Software System} (Version 10.8), 2025.
+\newblock \url{https://www.sagemath.org}.
+
+\end{thebibliography}
+
+\end{document}

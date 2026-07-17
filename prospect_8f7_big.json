@@ -1,0 +1,10 @@
+{
+  "screened": 200000,
+  "dhat_max": -0.032717064224600856,
+  "frac_dhat_pos": 0.0,
+  "model_pos_rate": 0.0,
+  "control_pos_rate": 0.0,
+  "n_confirmed": 0,
+  "best_seed": null,
+  "confirmed": []
+}
